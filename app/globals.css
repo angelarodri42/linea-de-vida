@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: #fafaf9;
+  color: #18181b;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Slim, unobtrusive horizontal scrollbar for the timeline track */
+.timeline-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+.timeline-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+.timeline-scroll::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 9999px;
+  border: 2px solid #fafaf9;
+}
