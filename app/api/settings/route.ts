@@ -9,7 +9,7 @@ export async function GET() {
   return handle(() => ({ settings: getSettings(), minimums: getSettingsMinimums() }));
 }
 
-// PUT /api/settings { total_years?, squares_per_year? }
+// PUT /api/settings { total_years?, squares_per_year?, show_calendar_year?, start_year? }
 export async function PUT(req: Request) {
   return handle(async () => {
     const body = await readJson(req);
@@ -19,6 +19,9 @@ export async function PUT(req: Request) {
         body.squares_per_year === undefined
           ? undefined
           : toInt(body.squares_per_year, "squares_per_year"),
+      show_calendar_year:
+        body.show_calendar_year === undefined ? undefined : body.show_calendar_year === true,
+      start_year: body.start_year === undefined ? undefined : toInt(body.start_year, "start_year"),
     });
     return { settings, minimums: getSettingsMinimums() };
   });

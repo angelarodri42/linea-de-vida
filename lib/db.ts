@@ -2,7 +2,7 @@ import "server-only";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { LIMITS, type Memory, type Settings } from "./types";
+import { LIMITS, type Memory, type Settings, type SizeSettings } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "memories.db");
@@ -41,25 +41,42 @@ function init(): Database.Database {
   return db;
 }
 
+/** Idempotent migrations for databases created before newer settings existed. */
+function migrate(db: Database.Database) {
+  const cols = new Set(
+    (db.prepare("PRAGMA table_info(settings)").all() as { name: string }[]).map((c) => c.name)
+  );
+  if (!cols.has("show_calendar_year")) {
+    db.exec("ALTER TABLE settings ADD COLUMN show_calendar_year INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!cols.has("start_year")) {
+    db.exec("ALTER TABLE settings ADD COLUMN start_year INTEGER NOT NULL DEFAULT 2000");
+  }
+}
+
 // Reuse one connection across hot reloads in dev.
 const globalForDb = globalThis as unknown as { __memoryDb?: Database.Database };
 const db = globalForDb.__memoryDb ?? (globalForDb.__memoryDb = init());
+migrate(db);
 
 // ---------- Settings ----------
 
 export function getSettings(): Settings {
-  return db
-    .prepare("SELECT total_years, squares_per_year FROM settings WHERE id = 1")
-    .get() as Settings;
+  const row = db
+    .prepare(
+      "SELECT total_years, squares_per_year, show_calendar_year, start_year FROM settings WHERE id = 1"
+    )
+    .get() as Omit<Settings, "show_calendar_year"> & { show_calendar_year: number };
+  return { ...row, show_calendar_year: row.show_calendar_year === 1 };
 }
 
 /** Smallest values the settings may shrink to without hiding an existing memory. */
-export function getSettingsMinimums(): Settings {
+export function getSettingsMinimums(): SizeSettings {
   const row = db
     .prepare(
       "SELECT COALESCE(MAX(year_index) + 1, 1) AS total_years, COALESCE(MAX(position_index) + 1, 1) AS squares_per_year FROM memories"
     )
-    .get() as Settings;
+    .get() as SizeSettings;
   return row;
 }
 
@@ -68,7 +85,19 @@ export function updateSettings(input: Partial<Settings>): Settings {
   const next: Settings = {
     total_years: input.total_years ?? current.total_years,
     squares_per_year: input.squares_per_year ?? current.squares_per_year,
+    show_calendar_year: input.show_calendar_year ?? current.show_calendar_year,
+    start_year: input.start_year ?? current.start_year,
   };
+
+  if (
+    !Number.isInteger(next.start_year) ||
+    next.start_year < LIMITS.minStartYear ||
+    next.start_year > LIMITS.maxStartYear
+  ) {
+    throw new UserError(
+      `El año inicial debe estar entre ${LIMITS.minStartYear} y ${LIMITS.maxStartYear}.`
+    );
+  }
 
   if (!isPosInt(next.total_years) || next.total_years > LIMITS.maxYears) {
     throw new UserError(`Los años deben ser un número entero entre 1 y ${LIMITS.maxYears}.`);
@@ -94,10 +123,9 @@ export function updateSettings(input: Partial<Settings>): Settings {
     );
   }
 
-  db.prepare("UPDATE settings SET total_years = ?, squares_per_year = ? WHERE id = 1").run(
-    next.total_years,
-    next.squares_per_year
-  );
+  db.prepare(
+    "UPDATE settings SET total_years = ?, squares_per_year = ?, show_calendar_year = ?, start_year = ? WHERE id = 1"
+  ).run(next.total_years, next.squares_per_year, next.show_calendar_year ? 1 : 0, next.start_year);
   return next;
 }
 

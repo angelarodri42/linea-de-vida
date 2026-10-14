@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MousePointerClick, Move } from "lucide-react";
-import { slotKey, type Memory, type Settings } from "@/lib/types";
+import { slotKey, type Memory, type Settings, type SizeSettings } from "@/lib/types";
 import SettingsBar from "./SettingsBar";
 import MemorySquare from "./MemorySquare";
 import SidePanel from "./SidePanel";
@@ -40,7 +40,7 @@ export default function MemoryTimeline({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Smallest settings that keep every memory visible (non-destructive resizing).
-  const minimums = useMemo<Settings>(() => {
+  const minimums = useMemo<SizeSettings>(() => {
     let y = 0;
     let p = 0;
     for (const m of memories.values()) {
@@ -187,7 +187,14 @@ export default function MemoryTimeline({
                     year < settings.total_years - 1 ? "border-r border-zinc-200" : ""
                   }`}
                 >
-                  <h2 className="text-sm font-semibold tabular-nums text-zinc-800">{year + 1}</h2>
+                  <h2 className="flex items-baseline gap-1.5 text-sm font-semibold tabular-nums text-zinc-800">
+                    {year + 1}
+                    {settings.show_calendar_year && (
+                      <span className="text-[11px] font-normal text-zinc-400">
+                        {settings.start_year + year}
+                      </span>
+                    )}
+                  </h2>
                   <div className="flex gap-1.5">
                     {positions.map((position) => {
                       const key = slotKey(year, position);
