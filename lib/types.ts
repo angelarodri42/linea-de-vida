@@ -1,5 +1,3 @@
-// Shared types (safe to import from client components).
-
 export type Settings = {
   total_years: number;
   squares_per_year: number;
@@ -16,8 +14,18 @@ export type Memory = {
   position_index: number; // 0-based
   title: string;
   content: string;
-  created_at: string;
+  created_at: string; // ISO 8601
 };
+
+/** Everything the app stores in the browser. */
+export type AppState = {
+  settings: Settings;
+  memories: Memory[];
+  next_id: number;
+  last_backup_at: string | null; // ISO 8601, last export or import
+};
+
+export type Slot = { year: number; position: number };
 
 export const LIMITS = {
   maxYears: 150,

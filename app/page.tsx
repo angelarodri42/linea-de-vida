@@ -1,9 +1,6 @@
-import { getSettings, listMemories } from "@/lib/db";
 import MemoryTimeline from "@/components/MemoryTimeline";
 
-export const dynamic = "force-dynamic";
-
-// Server component: read straight from SQLite so the first paint already has data.
+// Everything is stored in the visitor's browser, so the page itself is static.
 export default function Page() {
-  return <MemoryTimeline initialSettings={getSettings()} initialMemories={listMemories()} />;
+  return <MemoryTimeline />;
 }

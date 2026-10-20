@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Save, Trash2, Loader2, CalendarDays } from "lucide-react";
-import type { Memory } from "@/lib/types";
-
-type Slot = { year: number; position: number };
+import { X, Save, Trash2, Loader2, CalendarDays, Move } from "lucide-react";
+import type { Memory, Slot } from "@/lib/types";
 
 type Props = {
   open: boolean;
@@ -13,9 +11,18 @@ type Props = {
   onClose: () => void;
   onSave: (slot: Slot, title: string, content: string) => Promise<Memory>;
   onDelete: (memory: Memory) => Promise<void>;
+  onStartMove: (memory: Memory) => void;
 };
 
-export default function SidePanel({ open, slot, memory, onClose, onSave, onDelete }: Props) {
+export default function SidePanel({
+  open,
+  slot,
+  memory,
+  onClose,
+  onSave,
+  onDelete,
+  onStartMove,
+}: Props) {
   // Close on Escape.
   useEffect(() => {
     if (!open) return;
@@ -42,6 +49,7 @@ export default function SidePanel({ open, slot, memory, onClose, onSave, onDelet
           onClose={onClose}
           onSave={onSave}
           onDelete={onDelete}
+          onStartMove={onStartMove}
         />
       )}
     </aside>
@@ -55,6 +63,7 @@ function MemoryForm({
   onClose,
   onSave,
   onDelete,
+  onStartMove,
 }: {
   slot: Slot;
   memory?: Memory;
@@ -62,6 +71,7 @@ function MemoryForm({
   onClose: () => void;
   onSave: Props["onSave"];
   onDelete: Props["onDelete"];
+  onStartMove: Props["onStartMove"];
 }) {
   const [title, setTitle] = useState(memory?.title ?? "");
   const [content, setContent] = useState(memory?.content ?? "");
@@ -184,14 +194,26 @@ function MemoryForm({
             Eliminar
           </button>
         )}
-        <span className="ml-auto text-xs text-zinc-400">
+        {memory && (
+          <button
+            type="button"
+            onClick={() => onStartMove(memory)}
+            disabled={dirty}
+            title={dirty ? "Guarda los cambios antes de mover" : "Mover a otra casilla"}
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <Move className="h-4 w-4" />
+            Mover
+          </button>
+        )}
+        <span className="ml-auto hidden text-xs text-zinc-400 sm:inline">
           {dirty ? "Cambios sin guardar" : savedAt ? "Guardado" : ""}
         </span>
         <button
           type="submit"
           disabled={!canSave}
           title="Guardar (Ctrl+S)"
-          className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none"
+          className="ml-auto inline-flex h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-4 sm:ml-0 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Guardar
@@ -201,10 +223,9 @@ function MemoryForm({
   );
 }
 
-function formatDate(sqlite: string) {
-  // SQLite datetime('now') is UTC "YYYY-MM-DD HH:MM:SS".
-  const d = new Date(sqlite.replace(" ", "T") + "Z");
+function formatDate(iso: string) {
+  const d = new Date(iso);
   return isNaN(d.getTime())
-    ? sqlite
+    ? iso
     : d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
 }

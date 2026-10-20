@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarRange, CalendarDays, Grid3x3, Check, Loader2 } from "lucide-react";
+import { CalendarRange, CalendarDays, Grid3x3, Check, Loader2, Download, Upload } from "lucide-react";
 import { LIMITS, type Settings, type SizeSettings } from "@/lib/types";
 
 type Props = {
@@ -9,9 +9,18 @@ type Props = {
   minimums: SizeSettings;
   memoryCount: number;
   onApply: (next: Settings) => Promise<void>;
+  onExport: () => void;
+  onImport: () => void;
 };
 
-export default function SettingsBar({ settings, minimums, memoryCount, onApply }: Props) {
+export default function SettingsBar({
+  settings,
+  minimums,
+  memoryCount,
+  onApply,
+  onExport,
+  onImport,
+}: Props) {
   const [years, setYears] = useState(String(settings.total_years));
   const [squares, setSquares] = useState(String(settings.squares_per_year));
   const [showYear, setShowYear] = useState(settings.show_calendar_year);
@@ -68,6 +77,25 @@ export default function SettingsBar({ settings, minimums, memoryCount, onApply }
         <p className="text-xs text-zinc-500">
           {memoryCount} {memoryCount === 1 ? "recuerdo" : "recuerdos"} en {settings.total_years} años
         </p>
+        <div className="mt-1.5 flex gap-1">
+          <button
+            type="button"
+            onClick={onExport}
+            disabled={memoryCount === 0}
+            title="Descarga un archivo con todos tus recuerdos"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:text-zinc-300 disabled:hover:bg-transparent"
+          >
+            <Download className="h-3.5 w-3.5" /> Exportar
+          </button>
+          <button
+            type="button"
+            onClick={onImport}
+            title="Carga un archivo de copia descargado antes"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-50"
+          >
+            <Upload className="h-3.5 w-3.5" /> Importar
+          </button>
+        </div>
       </div>
 
       <form onSubmit={apply} className="flex flex-wrap items-end gap-4">

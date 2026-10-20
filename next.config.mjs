@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // better-sqlite3 is a native module; keep it out of the server bundle.
-  serverExternalPackages: ["better-sqlite3"],
+  // Fully static site: all data lives in each visitor's browser (IndexedDB).
+  output: "export",
 };
 
 export default nextConfig;

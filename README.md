@@ -1,49 +1,59 @@
-# Memory Timeline
+# Línea de Recuerdos
 
-A personal, local-first timeline of life memories. Next.js (App Router) + Tailwind CSS v4 + SQLite (`better-sqlite3`).
+A personal timeline of life memories, in Spanish. Next.js (static export) + Tailwind CSS v4.
 
-## Setup
+**All data stays on the visitor's device.** Memories are saved in the browser (IndexedDB). There is no server or database, so the site can be hosted for free on Netlify, and you never store anyone's personal data.
 
-1. Install **Node.js 20 or 22 LTS** from https://nodejs.org (includes npm).
-2. In this folder:
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-3. Open http://localhost:3000
+Open http://localhost:3000.
 
-The database is created automatically at `data/memories.db` on first run. Back up that file to back up your memories.
+## Deploy to Netlify
 
-> If `npm install` fails building `better-sqlite3` on Windows, you are probably on a Node version without a prebuilt binary. Use a Node LTS version (20 or 22).
+The repo includes `netlify.toml` (build `npm run build`, publish `out/`).
 
-### Starting from scratch instead (equivalent)
+1. In Netlify: **Add new site → Import an existing project → GitHub** and pick this repo.
+2. Keep the detected settings and deploy. Every push to `main` redeploys automatically.
 
-```bash
-npx create-next-app@15 memory-timeline --ts --tailwind --app --no-src-dir --no-eslint --import-alias "@/*"
-cd memory-timeline
-npm install better-sqlite3 lucide-react server-only
-npm install -D @types/better-sqlite3
-```
+To test the production build locally: `npm run build` then `npm run preview`.
 
-…then copy `lib/`, `components/`, `app/` and `next.config.mjs` from this project over the generated files.
+## Keeping memories safe
 
-## How it works
+Browser storage can be cleared (by the user, or by Safari after ~7 days of Safari use without visiting the site). The app protects against this with:
+
+- **Exportar / Importar** — download all memories as a `.json` file and load it back later or on another device.
+- **Backup reminder** — a banner appears when there's no backup or the last one is over 14 days old.
+- **Installable app (PWA)** — on iPhone, "Add to Home Screen" (the app shows a tip). Works offline.
+- **Persistent storage request** — asks the browser not to evict the data.
+
+## Code map
 
 | Path | Purpose |
 | --- | --- |
-| `lib/db.ts` | SQLite init + all queries (settings, save, delete, move/swap) |
-| `lib/types.ts` | Shared types and limits |
-| `app/api/settings` | `GET` / `PUT` settings |
-| `app/api/memories` | `GET` all, `POST` create-or-update by slot |
-| `app/api/memories/[id]` | `DELETE` |
-| `app/api/memories/move` | `POST { id, to_year, to_position }` — move or swap |
-| `components/MemoryTimeline.tsx` | Main client view: state, drag & drop, optimistic updates |
-| `components/SettingsBar.tsx` | Years / squares-per-year controls |
-| `components/MemorySquare.tsx` | One slot with hover tooltip |
-| `components/SidePanel.tsx` | Slide-out editor |
+| `lib/timeline.ts` | Pure rules: save, delete, move/swap, non-destructive settings |
+| `lib/storage.ts` | IndexedDB persistence, cross-tab sync, persistence request |
+| `lib/backup.ts` | Export / import file format and validation |
+| `components/MemoryTimeline.tsx` | Main view: state, drag & drop, tap-to-move |
+| `components/SettingsBar.tsx` | Settings, Exportar / Importar |
+| `components/SidePanel.tsx` | Slide-out editor (Guardar, Mover, Eliminar) |
+| `components/Notices.tsx` | Backup reminder and iPhone tip |
+| `public/sw.js`, `public/manifest.webmanifest` | Offline support and install metadata |
 
-- **Non-destructive settings:** memories are stored by `(year_index, position_index)` and never rewritten when settings change. Increasing values just adds empty slots. Decreasing below a slot that holds a memory is refused (the UI shows the minimum), so nothing is ever hidden or lost.
-- **Drag & drop:** drop on an empty square to move; drop on a filled square to swap the two. The swap runs in a single SQLite transaction.
-- **Shortcuts:** `Ctrl+S` / `Ctrl+Enter` saves in the panel, `Esc` closes it, mouse wheel scrolls the timeline sideways.
+Backup file format (`version: 1`):
+
+```json
+{
+  "app": "linea-de-vida",
+  "version": 1,
+  "exported_at": "2026-10-20T12:00:00.000Z",
+  "settings": { "total_years": 30, "squares_per_year": 10, "show_calendar_year": false, "start_year": 2000 },
+  "memories": [
+    { "year_index": 0, "position_index": 0, "title": "…", "content": "…", "created_at": "…" }
+  ]
+}
+```

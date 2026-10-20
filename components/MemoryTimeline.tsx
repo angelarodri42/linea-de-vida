@@ -1,61 +1,84 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MousePointerClick, Move } from "lucide-react";
-import { slotKey, type Memory, type Settings, type SizeSettings } from "@/lib/types";
+import { Loader2, MousePointerClick, Move, X } from "lucide-react";
+import { slotKey, type AppState, type Memory, type Settings, type Slot } from "@/lib/types";
+import * as timeline from "@/lib/timeline";
+import { loadState, onOtherTabChange, requestPersistence, saveState } from "@/lib/storage";
+import { downloadBackup, parseBackup } from "@/lib/backup";
 import SettingsBar from "./SettingsBar";
 import MemorySquare from "./MemorySquare";
 import SidePanel from "./SidePanel";
+import Notices from "./Notices";
 
-type Slot = { year: number; position: number };
-
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error ?? `La solicitud falló (${res.status})`);
-  return data as T;
-}
-
-function toMap(list: Memory[]) {
-  return new Map(list.map((m) => [slotKey(m.year_index, m.position_index), m]));
-}
-
-export default function MemoryTimeline({
-  initialSettings,
-  initialMemories,
-}: {
-  initialSettings: Settings;
-  initialMemories: Memory[];
-}) {
-  const [settings, setSettings] = useState(initialSettings);
-  const [memories, setMemories] = useState(() => toMap(initialMemories));
+export default function MemoryTimeline() {
+  const [app, setApp] = useState<AppState | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Slot | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [dragId, setDragId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [movingId, setMovingId] = useState<number | null>(null); // tap-to-move mode
   const [toast, setToast] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
-  // Smallest settings that keep every memory visible (non-destructive resizing).
-  const minimums = useMemo<SizeSettings>(() => {
-    let y = 0;
-    let p = 0;
-    for (const m of memories.values()) {
-      y = Math.max(y, m.year_index + 1);
-      p = Math.max(p, m.position_index + 1);
-    }
-    return { total_years: Math.max(1, y), squares_per_year: Math.max(1, p) };
-  }, [memories]);
+  // Latest state for async handlers, and a queue so writes reach IndexedDB in order.
+  const stateRef = useRef<AppState | null>(null);
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
+  const persistAsked = useRef(false);
 
-  // Auto-hide toast.
+  // ---------- Loading & persistence ----------
+
+  useEffect(() => {
+    const load = () =>
+      loadState()
+        .then((s) => {
+          stateRef.current = s;
+          setApp(s);
+        })
+        .catch((err: Error) => setLoadError(err.message));
+    load();
+    return onOtherTabChange(load);
+  }, []);
+
+  /** Show `next` immediately and save it; reverts the screen if the save fails. */
+  const commit = useCallback((next: AppState): Promise<void> => {
+    const prev = stateRef.current;
+    stateRef.current = next;
+    setApp(next);
+    const write = writeQueue.current.then(() => saveState(next));
+    writeQueue.current = write.catch(() => {});
+    return write.catch((err: Error) => {
+      if (stateRef.current === next && prev) {
+        stateRef.current = prev;
+        setApp(prev);
+      }
+      throw new Error(`No se pudo guardar en este navegador. ${err.message ?? ""}`.trim());
+    });
+  }, []);
+
+  function askPersistenceOnce() {
+    if (persistAsked.current) return;
+    persistAsked.current = true;
+    requestPersistence();
+  }
+
+  // ---------- UI effects ----------
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Escape cancels move mode.
+  useEffect(() => {
+    if (movingId === null) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMovingId(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [movingId]);
 
   // Mouse wheel scrolls the timeline horizontally.
   useEffect(() => {
@@ -69,105 +92,167 @@ export default function MemoryTimeline({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [app !== null]);
+
+  const memories = useMemo(
+    () => new Map((app?.memories ?? []).map((m) => [slotKey(m.year_index, m.position_index), m])),
+    [app]
+  );
 
   // ---------- Actions ----------
 
+  const showError = (err: unknown) =>
+    setToast({ text: err instanceof Error ? err.message : "Algo salió mal.", tone: "error" });
+
   async function applySettings(next: Settings) {
     try {
-      const res = await api<{ settings: Settings }>("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify(next),
-      });
-      setSettings(res.settings);
+      await commit(timeline.updateSettings(stateRef.current!, next));
       setToast({ text: "Línea de tiempo actualizada", tone: "ok" });
     } catch (err) {
-      setToast({ text: (err as Error).message, tone: "error" });
+      showError(err);
     }
   }
 
-  const saveMemory = useCallback(async (slot: Slot, title: string, content: string) => {
-    const saved = await api<Memory>("/api/memories", {
-      method: "POST",
-      body: JSON.stringify({
-        year_index: slot.year,
-        position_index: slot.position,
-        title,
-        content,
-      }),
-    });
-    setMemories((prev) => new Map(prev).set(slotKey(saved.year_index, saved.position_index), saved));
-    setToast({ text: "Recuerdo guardado", tone: "ok" });
-    return saved;
-  }, []);
+  const saveMemory = useCallback(
+    async (slot: Slot, title: string, content: string) => {
+      const { state, memory } = timeline.saveMemory(stateRef.current!, slot, title, content);
+      await commit(state);
+      askPersistenceOnce();
+      setToast({ text: "Recuerdo guardado", tone: "ok" });
+      return memory;
+    },
+    [commit]
+  );
 
-  const deleteMemory = useCallback(async (memory: Memory) => {
-    await api(`/api/memories/${memory.id}`, { method: "DELETE" });
-    setMemories((prev) => {
-      const next = new Map(prev);
-      next.delete(slotKey(memory.year_index, memory.position_index));
-      return next;
-    });
-    setPanelOpen(false);
-    setToast({ text: "Recuerdo eliminado", tone: "ok" });
-  }, []);
+  const deleteMemory = useCallback(
+    async (memory: Memory) => {
+      await commit(timeline.deleteMemory(stateRef.current!, memory.id));
+      setPanelOpen(false);
+      setToast({ text: "Recuerdo eliminado", tone: "ok" });
+    },
+    [commit]
+  );
 
   async function moveMemory(id: number, to: Slot) {
-    const before = memories;
-    const source = [...before.values()].find((m) => m.id === id);
+    const before = stateRef.current!;
+    const source = before.memories.find((m) => m.id === id);
     if (!source) return;
     const from: Slot = { year: source.year_index, position: source.position_index };
-    if (from.year === to.year && from.position === to.position) return;
-
-    const fromKey = slotKey(from.year, from.position);
-    const toKey = slotKey(to.year, to.position);
-    const target = before.get(toKey);
-
-    // Optimistic update: move, or swap if the target slot is filled.
-    const next = new Map(before);
-    next.delete(fromKey);
-    next.set(toKey, { ...source, year_index: to.year, position_index: to.position });
-    if (target) {
-      next.set(fromKey, { ...target, year_index: from.year, position_index: from.position });
-    }
-    setMemories(next);
-
-    // Keep the side panel attached to the memory it was showing.
-    if (selected) {
-      const selKey = slotKey(selected.year, selected.position);
-      if (selKey === fromKey) setSelected(to);
-      else if (target && selKey === toKey) setSelected(from);
-    }
+    const target = memories.get(slotKey(to.year, to.position));
 
     try {
-      await api<Memory[]>("/api/memories/move", {
-        method: "POST",
-        body: JSON.stringify({ id, to_year: to.year, to_position: to.position }),
-      });
+      const next = timeline.moveMemory(before, id, to);
+      if (next === before) return;
+      // Keep the side panel attached to the memory it was showing.
+      if (selected) {
+        const sel = slotKey(selected.year, selected.position);
+        if (sel === slotKey(from.year, from.position)) setSelected(to);
+        else if (target && sel === slotKey(to.year, to.position)) setSelected(from);
+      }
+      await commit(next);
     } catch (err) {
-      setMemories(before);
-      setToast({ text: (err as Error).message, tone: "error" });
+      showError(err);
+    }
+  }
+
+  function exportBackup() {
+    const state = stateRef.current!;
+    downloadBackup(state);
+    commit({ ...state, last_backup_at: new Date().toISOString() }).catch(showError);
+    setToast({ text: "Copia descargada", tone: "ok" });
+  }
+
+  async function importBackup(file: File) {
+    try {
+      const next = parseBackup(await file.text());
+      const current = stateRef.current!.memories.length;
+      const n = next.memories.length;
+      const question =
+        current === 0
+          ? `¿Importar ${n} recuerdos de «${file.name}»?`
+          : `«${file.name}» tiene ${n} recuerdos.\n\nReemplazarán los ${current} recuerdos que hay ahora en este navegador. Si quieres conservarlos, cancela y usa «Exportar» primero.\n\n¿Continuar?`;
+      if (!window.confirm(question)) return;
+      setPanelOpen(false);
+      setMovingId(null);
+      await commit(next);
+      askPersistenceOnce();
+      setToast({ text: `${n} recuerdos importados`, tone: "ok" });
+    } catch (err) {
+      showError(err);
     }
   }
 
   const closePanel = useCallback(() => setPanelOpen(false), []);
 
+  const startMove = useCallback((memory: Memory) => {
+    setPanelOpen(false);
+    setMovingId(memory.id);
+  }, []);
+
   // ---------- Render ----------
 
+  if (loadError) {
+    return (
+      <div className="flex h-dvh items-center justify-center p-6 text-center text-sm text-rose-700">
+        {loadError}
+      </div>
+    );
+  }
+  if (!app) {
+    return (
+      <div className="flex h-dvh items-center justify-center gap-2 text-sm text-zinc-400">
+        <Loader2 className="h-4 w-4 animate-spin" /> Cargando tus recuerdos…
+      </div>
+    );
+  }
+
+  const { settings } = app;
   const years = Array.from({ length: settings.total_years }, (_, i) => i);
   const positions = Array.from({ length: settings.squares_per_year }, (_, i) => i);
   const selectedMemory = selected
     ? memories.get(slotKey(selected.year, selected.position))
     : undefined;
+  const movingMemory = movingId !== null ? app.memories.find((m) => m.id === movingId) : undefined;
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-dvh flex-col">
       <SettingsBar
         settings={settings}
-        minimums={minimums}
-        memoryCount={memories.size}
+        minimums={timeline.minimums(app.memories)}
+        memoryCount={app.memories.length}
         onApply={applySettings}
+        onExport={exportBackup}
+        onImport={() => importRef.current?.click()}
       />
+      <input
+        ref={importRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = ""; // allow choosing the same file again
+          if (file) importBackup(file);
+        }}
+      />
+
+      <Notices state={app} onExport={exportBackup} />
+
+      {movingMemory && (
+        <div className="flex items-center justify-center gap-3 bg-violet-600 px-4 py-2.5 text-sm text-white">
+          <Move className="h-4 w-4 shrink-0" />
+          <span>
+            Toca una casilla para mover <strong>«{movingMemory.title}»</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => setMovingId(null)}
+            className="inline-flex items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-xs font-medium hover:bg-white/25"
+          >
+            <X className="h-3.5 w-3.5" /> Cancelar
+          </button>
+        </div>
+      )}
 
       <main className="relative flex flex-1 flex-col justify-center overflow-hidden">
         <div
@@ -210,10 +295,18 @@ export default function MemoryTimeline({
                             selected?.year === year &&
                             selected?.position === position
                           }
-                          dragging={dragId !== null}
-                          isDragSource={memory !== undefined && memory.id === dragId}
+                          dragging={dragId !== null || movingId !== null}
+                          isDragSource={
+                            memory !== undefined && (memory.id === dragId || memory.id === movingId)
+                          }
                           isDragOver={dragOver === key && memory?.id !== dragId}
                           onClick={() => {
+                            if (movingId !== null) {
+                              const id = movingId;
+                              setMovingId(null);
+                              moveMemory(id, { year, position });
+                              return;
+                            }
                             setSelected({ year, position });
                             setPanelOpen(true);
                           }}
@@ -253,12 +346,12 @@ export default function MemoryTimeline({
           </div>
         </div>
 
-        <footer className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center gap-6 text-xs text-zinc-400">
+        <footer className="pointer-events-none absolute inset-x-0 bottom-4 hidden justify-center gap-6 text-xs text-zinc-400 sm:flex">
           <span className="flex items-center gap-1.5">
             <MousePointerClick className="h-3.5 w-3.5" /> Haz clic en una casilla para escribir o leer
           </span>
           <span className="flex items-center gap-1.5">
-            <Move className="h-3.5 w-3.5" /> Arrastra un recuerdo a otra casilla para moverlo o intercambiarlo
+            <Move className="h-3.5 w-3.5" /> Arrastra un recuerdo (o usa «Mover») para moverlo o intercambiarlo
           </span>
         </footer>
       </main>
@@ -270,6 +363,7 @@ export default function MemoryTimeline({
         onClose={closePanel}
         onSave={saveMemory}
         onDelete={deleteMemory}
+        onStartMove={startMove}
       />
 
       {toast && (
